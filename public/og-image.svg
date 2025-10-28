@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#0b1220"/>
+      <stop offset="1" stop-color="#1f2937"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <g transform="translate(80,120)">
+    <rect x="0" y="0" width="160" height="160" rx="32" fill="#7c3aed"/>
+    <path d="M60 40l72 40-72 40V40z" fill="#fff"/>
+  </g>
+  <text x="280" y="180" font-family="Segoe UI, Roboto, Arial, sans-serif" font-size="56" fill="#fff" font-weight="700">Descargador de Videos por URL</text>
+  <text x="280" y="240" font-family="Segoe UI, Roboto, Arial, sans-serif" font-size="30" fill="#cbd5e1">Baja videos de YouTube, Facebook, Twitch y X</text>
+  <text x="80" y="540" font-family="Segoe UI, Roboto, Arial, sans-serif" font-size="22" fill="#94a3b8">Vista previa rápida • Tema claro/oscuro • Descarga cuando sea compatible</text>
+</svg>

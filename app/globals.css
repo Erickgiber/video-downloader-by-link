@@ -1,26 +1,244 @@
 @import "tailwindcss";
 
+/* Theme variables inspired by Vercel's light/dark palettes. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  /* Light theme */
+  --bg: #f6f8fa; /* softer page background (GitHub light) */
+  --card: #ffffff; /* clean card surface */
+  --fg: #1f2937; /* comfortable dark text */
+  --muted: #6b7280; /* softer secondary text */
+  --accent: #eef2f6; /* subtle accent surface */
+  --accent-600: #d6dbe3; /* muted accent for blocks */
+  --primary: #7c3aed; /* purple accent */
+  --primary-600: #6d28d9; /* hover */
+  --border: #e5e7eb; /* gentle border */
+  /* Warning palette (light) */
+  --warning-bg: #FFF7E6;
+  --warning-text: #92400E;
+  --warning-border: #F59E0B;
+  --toast-bg: rgba(15, 23, 42, 0.95);
+  --trans: 200ms;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    /* Dark theme (Vercel-like) */
+    /* Blend GitHub + Vercel dark tones */
+    --bg: #0d1117; /* GitHub dark page background */
+    --card: #0f1724; /* slightly lighter panel (Vercel-like) */
+    --fg: #c9d1d9; /* GitHub text on dark */
+    --muted: #8b949e; /* GitHub muted */
+    --accent: #0b1220; /* deep accent */
+    --accent-600: #05060a; /* darker accent */
+    --primary: #7c3aed; /* Vercel/GitHub friendly purple */
+    --primary-600: #6d28d9; /* darker purple */
+    --border: #30363d; /* GitHub border tone */
+    /* Warning palette (dark) */
+    --warning-bg: #1f1400; /* deep amber backdrop */
+    --warning-text: #fbbf24; /* readable amber text */
+    --warning-border: #f59e0b; /* amber border */
+    --toast-bg: rgba(2,6,23,0.85);
+    --trans: 200ms;
   }
 }
 
+/* Manual theme overrides using data-theme on <html>. Setting data-theme="dark" or "light"
+   will override system preferences. If no attribute exists, prefers-color-scheme applies. */
+[data-theme="dark"] {
+  /* Blend GitHub + Vercel dark tones */
+  --bg: #0d1117;
+  --card: #0f1724;
+  --fg: #c9d1d9;
+  --muted: #8b949e;
+  --accent: #0b1220;
+  --accent-600: #05060a;
+  --primary: #7c3aed;
+  --primary-600: #6d28d9;
+  --border: #30363d;
+  /* Warning palette (dark) */
+  --warning-bg: #1f1400;
+  --warning-text: #fbbf24;
+  --warning-border: #f59e0b;
+  --toast-bg: rgba(2,6,23,0.85);
+}
+
+[data-theme="light"] {
+  --bg: #f6f8fa;
+  --card: #ffffff;
+  --fg: #1f2937;
+  --muted: #6b7280;
+  --accent: #eef2f6;
+  --accent-600: #d6dbe3;
+  --primary: #7c3aed;
+  --primary-600: #6d28d9;
+  --border: #e5e7eb;
+  /* Warning palette (light) */
+  --warning-bg: #FFF7E6;
+  --warning-text: #92400E;
+  --warning-border: #F59E0B;
+  --toast-bg: rgba(15, 23, 42, 0.95);
+}
+
+
+
+/* Base layout helpers that use the CSS variables (complements Tailwind utilities) */
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+}
+
+/* Handy utility classes used across the app */
+.bg-app { background-color: var(--bg); }
+.text-app { color: var(--fg); }
+.muted { color: var(--muted); }
+.card {
+  background-color: var(--card);
+  border: 1px solid var(--border);
+  transition: background-color var(--trans), transform 160ms ease, box-shadow var(--trans);
+}
+.btn-primary {
+  background-color: var(--primary);
+  color: white;
+  border-radius: 0.5rem;
+}
+.btn-primary:hover { background-color: var(--primary-600); }
+.btn-lift:hover { transform: translateY(-2px); }
+.btn-ghost {
+  background-color: transparent;
+  border: 1px solid var(--border);
+  color: var(--fg);
+  border-radius: 0.5rem;
+}
+.toast {
+  background: var(--toast-bg);
+  color: white;
+  padding: 0.5rem 1rem;
+  border-radius: 0.5rem;
+  transition: opacity var(--trans), transform 160ms ease;
+}
+
+/* Form input and spinner helpers */
+.input {
+  border: 1px solid var(--border);
+  background-color: transparent;
+  padding: 0.75rem 1rem;
+  color: var(--fg);
+  border-radius: 0.5rem;
+}
+.input::placeholder { color: var(--muted); }
+.input:focus { outline: none; box-shadow: 0 0 0 4px rgba(124,58,237,0.12); }
+
+.spinner { border-bottom-color: var(--primary); }
+.preview-bg { background-color: var(--accent-600); }
+
+/* Smooth transition for themeable properties */
+* {
+  transition: background-color var(--trans), color var(--trans), border-color var(--trans);
+}
+
+/* small animations */
+.fade-in { opacity: 0; transform: translateY(4px); animation: fadeIn 220ms forwards ease-out; }
+@keyframes fadeIn {
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Segmented 3-way switch (light / system / dark) */
+.segmented {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  padding: 3px;
+  border-radius: 9999px;
+  background: var(--card);
+  border: 1px solid var(--border);
+}
+.segmented .knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  height: calc(100% - 6px);
+  width: calc((100% - 6px) / 3);
+  background: var(--primary);
+  border-radius: 9999px;
+  z-index: 1;
+  transition: left var(--trans) ease, background-color var(--trans) ease;
+}
+.segmented .option {
+  position: relative;
+  z-index: 2;
+  padding: 6px 12px;
+  border-radius: 9999px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 0.8rem;
+  cursor: pointer;
+  border: none;
+}
+.segmented .option:focus { outline: none; }
+.segmented.pos-light .knob { left: 3px; }
+.segmented.pos-system .knob { left: calc(3px + 33.3333%); }
+.segmented.pos-dark .knob { left: calc(3px + 66.6666%); }
+.segmented .option.active { color: white; }
+.segmented .knob { pointer-events: none; }
+
+/* icon sizing inside segmented options */
+.segmented .option svg { width: 16px; height: 16px; display: inline-block; margin-right: 8px; }
+
+/* simple tooltip for segmented options */
+.option[data-tooltip] { position: relative; }
+.option[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%) translateY(6px);
+  background: var(--toast-bg);
+  color: white;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--trans), transform 160ms ease;
+  box-shadow: 0 6px 20px rgba(2,6,23,0.4);
+}
+.option[data-tooltip]:hover::after, .option[data-tooltip]:focus::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* Preview size limits: keep player within viewport and maintain aspect ratio */
+.preview-container {
+  width: 100%;
+  max-width: 100%;
+  max-height: 60vh; /* never taller than 60% of viewport */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.preview-embed-wrapper {
+  width: 100%;
+  max-height: 60vh;
+  aspect-ratio: 16 / 9; /* prefer 16:9 embeds */
+}
+.preview-embed {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+}
+.preview-video {
+  width: 100%;
+  max-height: 50vh;
+  object-fit: contain;
+  display: block;
+}
+
+/* Small responsive tweaks */
+@media (max-width: 640px) {
+  .card { padding: 1.25rem; }
 }
