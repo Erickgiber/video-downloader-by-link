@@ -11,7 +11,6 @@ export default function Page() {
   const [downloadLoading, setDownloadLoading] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const tweetContainerRef = useRef<HTMLDivElement | null>(null);
   const [downloadable, setDownloadable] = useState(false);
   const [isHls, setIsHls] = useState(false);
 
@@ -26,13 +25,14 @@ export default function Page() {
     try {
       const saved = localStorage.getItem("vd_theme");
       if (saved === "light" || saved === "dark" || saved === "system") {
-        setTheme(saved as any);
-        applyTheme(saved as any);
+        const themeVal = saved as "light" | "dark" | "system";
+        setTheme(themeVal);
+        applyTheme(themeVal);
       } else {
         setTheme("system");
         applyTheme("system");
       }
-    } catch (e) {
+    } catch {
       setTheme("system");
     }
   }, []);
@@ -45,7 +45,7 @@ export default function Page() {
       } else {
         el.setAttribute("data-theme", t);
       }
-    } catch (e) {
+    } catch {
       // ignore
     }
   }
@@ -53,7 +53,7 @@ export default function Page() {
   function handleSetTheme(t: "light" | "dark" | "system", event: React.MouseEvent<HTMLButtonElement>) {
     setTheme(t);
     event.currentTarget.blur();
-    try { localStorage.setItem("vd_theme", t); } catch (e) {}
+    try { localStorage.setItem("vd_theme", t); } catch {}
     applyTheme(t);
   }
 
@@ -62,98 +62,9 @@ export default function Page() {
       // basic validation
       const parsed = new URL(u);
       return parsed.protocol === "http:" || parsed.protocol === "https:";
-    } catch (e) {
+    } catch {
       return false;
     }
-  }
-
-  function toYoutubeEmbed(u: string) {
-    // support watch?v= and youtu.be links
-    try {
-      const parsed = new URL(u);
-      if (parsed.hostname.includes("youtube.com")) {
-        const v = parsed.searchParams.get("v");
-        if (v) return `https://www.youtube.com/embed/${v}`;
-      }
-      if (parsed.hostname.includes("youtu.be")) {
-        const id = parsed.pathname.slice(1);
-        if (id) return `https://www.youtube.com/embed/${id}`;
-      }
-    } catch (e) {}
-    return null;
-  }
-
-  function toFacebookEmbed(u: string) {
-    try {
-      const parsed = new URL(u);
-      if (!parsed.hostname.includes("facebook.com")) return null;
-      // Use Facebook video plugin iframe
-      const href = encodeURIComponent(u);
-      // Let height be responsive; Facebook respects width via CSS; we constrain container
-      const embed = `https://www.facebook.com/plugins/video.php?href=${href}&show_text=false&height=360`;
-      return embed;
-    } catch (e) {
-      return null;
-    }
-  }
-
-  function toTwitchEmbed(u: string) {
-    try {
-      const parsed = new URL(u);
-      if (!parsed.hostname.includes("twitch.tv") && !parsed.hostname.includes("clips.twitch.tv")) return null;
-      const parent = window.location.hostname;
-
-      // Clips
-      if (parsed.hostname.includes("clips.twitch.tv")) {
-        const slug = parsed.pathname.split("/").filter(Boolean)[0];
-        if (slug) return `https://clips.twitch.tv/embed?clip=${slug}&parent=${parent}&autoplay=false`;
-      }
-
-      const parts = parsed.pathname.split("/").filter(Boolean);
-      // /videos/{id}
-      if (parts[0] === "videos" && parts[1]) {
-        const id = parts[1];
-        return `https://player.twitch.tv/?video=${id}&parent=${parent}&autoplay=false`;
-      }
-      // /{channel} or /{channel}/clip/{slug}
-      if (parts[1] === "clip" && parts[2]) {
-        const slug = parts[2];
-        return `https://clips.twitch.tv/embed?clip=${slug}&parent=${parent}&autoplay=false`;
-      }
-      if (parts[0]) {
-        const channel = parts[0];
-        return `https://player.twitch.tv/?channel=${channel}&parent=${parent}&autoplay=false`;
-      }
-      return null;
-    } catch (e) {
-      return null;
-    }
-  }
-
-  function isXUrl(u: string) {
-    try {
-      const parsed = new URL(u);
-      return parsed.hostname.includes("twitter.com") || parsed.hostname.includes("x.com");
-    } catch (e) { return false; }
-  }
-
-  function loadTwitterWidgets() {
-    return new Promise<void>((resolve) => {
-      if ((window as any).twttr && (window as any).twttr.widgets) {
-        resolve();
-        return;
-      }
-      const existing = document.querySelector('script[src^="https://platform.twitter.com/widgets.js"]') as HTMLScriptElement | null;
-      if (existing) {
-        existing.addEventListener('load', () => resolve());
-        return;
-      }
-      const s = document.createElement('script');
-      s.src = 'https://platform.twitter.com/widgets.js';
-      s.async = true;
-      s.onload = () => resolve();
-      document.body.appendChild(s);
-    });
   }
 
   async function handlePreview(e?: React.FormEvent) {
@@ -249,7 +160,7 @@ export default function Page() {
       try {
         await navigator.share({ title: "Video", url });
         setToast("Compartido");
-      } catch (e) {
+      } catch {
         setToast("Cancelado");
       }
       return;
@@ -258,7 +169,7 @@ export default function Page() {
     try {
       await navigator.clipboard.writeText(url);
       setToast("Enlace copiado al portapapeles");
-    } catch (e) {
+    } catch {
       // fallback: open new tab
       window.open(url, "_blank");
       setToast("No se pudo acceder al portapapeles. Abriendo enlace...");
@@ -333,7 +244,7 @@ export default function Page() {
           <div className="mt-6">
             {!previewUrl && (
               <div className="rounded-lg p-6 text-center muted border border-dashed border-(--border)">
-                <p>Para comenzar, introduce un enlace y pulsa "Previsualizar video".</p>
+                <p>Para comenzar, introduce un enlace y pulsa &quot;Previsualizar video&quot;.</p>
                 <p className="mt-3 text-sm">Existen videos que no son descargables por causa de algun formato o el proveedor.</p>
               </div>
             )}
