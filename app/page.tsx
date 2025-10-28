@@ -113,25 +113,59 @@ export default function Page() {
   }
 
   async function handleDownload() {
-    if (!previewUrl) return;
+    if (!previewUrl && !url) return;
     // If not supported, do nothing (button should already be disabled)
     if (!downloadable || (provider === "direct" && isHls)) return;
 
+    // Para YouTube enviamos la URL original; para otros usamos la previewUrl directa
+    const srcForDownload = provider === "youtube" ? url : (previewUrl || url);
+    if (!srcForDownload) return;
+
+    // Utilizamos fetch para obtener el archivo como Blob y disparar la descarga sin abrir pestañas
     setDownloadLoading(true);
+    setToast("Se está descargando el video...");
+
+    function filenameFromContentDisposition(cd: string | null): string | null {
+      if (!cd) return null;
+      // filename*=UTF-8''...
+      const star = cd.match(/filename\*=(?:UTF-8''|)([^;\r\n]+)/i);
+      if (star && star[1]) {
+        try { return decodeURIComponent(star[1].replace(/^"|"$/g, "")); } catch {}
+      }
+      const normal = cd.match(/filename=("?)([^";\r\n]+)\1/i);
+      if (normal && normal[2]) return normal[2];
+      return null;
+    }
+
     try {
-      // Use server proxy to bypass CORS and apply a filename
-      const proxyUrl = `/api/download?url=${encodeURIComponent(previewUrl)}`;
+      const proxyUrl = `/api/download?url=${encodeURIComponent(srcForDownload)}`;
+      const res = await fetch(proxyUrl, { method: "GET" });
+      if (!res.ok) {
+        const msg = await res.text().catch(() => "");
+        throw new Error(msg || `Fallo al descargar. Código ${res.status}`);
+      }
+
+      const blob = await res.blob();
+      const cd = res.headers.get("content-disposition");
+      const suggested = filenameFromContentDisposition(cd);
+      const fallbackExt = provider === "youtube" ? ".mp4" : "";
+      const fallbackName = (url.split("/").pop() || "video") + fallbackExt;
+      const filename = (suggested || fallbackName).replace(/[\\/:*?"<>|]+/g, " ").trim();
+
+      const objectUrl = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = proxyUrl;
-      a.rel = "noopener";
-      a.target = "_blank"; // allow browser download UI
+      a.href = objectUrl;
+      a.download = filename || "video";
       document.body.appendChild(a);
       a.click();
       a.remove();
-      setToast("Descarga iniciada desde el servidor");
-    } catch (err) {
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 10_000);
+
+      setToast("Descarga iniciada");
+    } catch (err: any) {
       console.error(err);
-      setToast("No se pudo descargar el video desde esta URL");
+      const msg = (err && typeof err.message === 'string') ? err.message : "Ocurrió un error al descargar el video";
+      setToast(msg);
     } finally {
       setDownloadLoading(false);
     }

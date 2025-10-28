@@ -2,7 +2,7 @@
 
 # 🚀 Video Downloader by Link
 
-Aplicación web en Next.js para previsualizar enlaces de video y descargar archivos de video directos cuando es posible.
+Aplicación web en Next.js para previsualizar enlaces de video y descargar archivos de video cuando es posible (incluye soporte para YouTube mediante ytdl-core).
 
 </div>
 
@@ -13,7 +13,7 @@ Pega un enlace de un video público y la app intentará:
 - Identificar el proveedor: YouTube, Facebook, Twitch, X (Twitter) u otros.
 - Mostrar una previsualización usando el reproductor oficial (embeds) cuando aplica.
 - Resolver enlaces directos a archivos de video (p. ej., .mp4, .webm) desde páginas compatibles.
-- Permitir la descarga del archivo únicamente cuando sea un video directo (no HLS/DRM).
+- Permitir la descarga del archivo cuando sea posible. Para YouTube, la descarga se realiza en el servidor usando `ytdl-core` (formato progresivo disponible, priorizando MP4).
 
 Soporta previsualización para:
 
@@ -26,6 +26,7 @@ Soporta previsualización para:
 Limitaciones importantes:
 
 - No descarga streams HLS (.m3u8) ni contenidos con DRM o que requieran autenticación.
+- En YouTube, si no existe un formato progresivo (video+audio) disponible, la descarga puede no estar disponible sin procesamiento adicional (ej. ffmpeg para muxear). Este proyecto no integra ffmpeg.
 - Algunos sitios pueden bloquear el acceso por CORS, restricciones regionales o políticas del servidor.
 - Sólo funciona con contenido público y accesible.
 
@@ -34,7 +35,7 @@ Limitaciones importantes:
 - Frontend: `app/page.tsx` (App Router, React 19) para UI, tema claro/oscuro y previsualización.
 - API interna:
 	- `GET/POST /api/resolve?url=…` — Detecta proveedor y obtiene URL de previsualización/descarga.
-	- `GET /api/download?url=…` — Proxy de descarga para archivos de video directos.
+	- `GET /api/download?url=…` — Descarga de YouTube con `ytdl-core` y proxy para archivos de video directos.
 - Extracción HTML: se apoyan metatags, video/source, link preload y JSON‑LD para encontrar medios.
 
 ## ✅ Requisitos
@@ -103,13 +104,13 @@ Respuesta (ejemplo):
 
 También acepta `POST /api/resolve` con body JSON `{ "url": "https://…" }`.
 
-2) Descargar a través del proxy del servidor
+2) Descargar a través del servidor (YouTube y enlaces directos)
 
 ```text
-GET /api/download?url={URL_DE_VIDEO_DIRECTO}
+GET /api/download?url={URL_DE_VIDEO_O_EMBED}
 ```
 
-Devuelve el stream con cabecera `Content-Disposition` para disparar la descarga en el navegador.
+Devuelve el stream con cabecera `Content-Disposition` para disparar la descarga en el navegador. Para URLs de YouTube (watch, short, embed o youtu.be), el servidor usa `ytdl-core` para seleccionar un formato progresivo (priorizando MP4) y enviarlo al navegador.
 
 ## ⚠️ Consideraciones y límites
 

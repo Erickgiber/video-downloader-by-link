@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import ytdl from "ytdl-core";
 import * as cheerio from "cheerio";
 
 export const runtime = "nodejs";
@@ -201,7 +202,20 @@ async function resolveUrl(req: NextRequest, target: string): Promise<ResolveResu
 
   // Known embed platforms
   const yt = toYoutubeEmbed(target);
-  if (yt) return { provider: "youtube", previewUrl: yt, originalUrl, downloadable: false };
+  // Para YouTube, mostramos el embed para preview y verificamos si hay formato progresivo descargable
+  if (yt) {
+    let downloadable = true;
+    try {
+      const id = ytdl.getURLVideoID(originalUrl);
+      const info = await ytdl.getInfo(id);
+      downloadable = info.formats.some((f) => f.hasVideo && f.hasAudio);
+    } catch {
+      // Si falla, dejamos descargable por defecto y lo validamos en /api/download
+      downloadable = true;
+    }
+    // Quemado el "false" temporalmente
+    return { provider: "youtube", previewUrl: yt, originalUrl, downloadable: false };
+  }
   const fb = toFacebookEmbed(target);
   if (fb) return { provider: "facebook", previewUrl: fb, originalUrl, downloadable: false };
   const tw = toTwitchEmbed(target, parentHost);
