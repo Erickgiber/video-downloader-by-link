@@ -19,6 +19,18 @@ type ResolveResult = {
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36";
 
+// Helper function to safely check if a hostname matches a domain
+// Prevents URL substring sanitization vulnerabilities
+function isValidHostname(hostname: string, ...allowedDomains: string[]): boolean {
+  const lower = hostname.toLowerCase();
+  for (const domain of allowedDomains) {
+    if (lower === domain || lower === `www.${domain}` || lower.endsWith(`.${domain}`)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function isHttpUrl(u: string) {
   try {
     const p = new URL(u);
@@ -41,11 +53,11 @@ function isHlsContentType(ct: string | null | undefined) {
 function toYoutubeEmbed(u: string) {
   try {
     const parsed = new URL(u);
-    if (parsed.hostname.includes("youtube.com")) {
+    if (isValidHostname(parsed.hostname, "youtube.com")) {
       const v = parsed.searchParams.get("v");
       if (v) return `https://www.youtube.com/embed/${v}`;
     }
-    if (parsed.hostname.includes("youtu.be")) {
+    if (isValidHostname(parsed.hostname, "youtu.be")) {
       const id = parsed.pathname.slice(1);
       if (id) return `https://www.youtube.com/embed/${id}`;
     }
@@ -56,7 +68,7 @@ function toYoutubeEmbed(u: string) {
 function toFacebookEmbed(u: string) {
   try {
     const parsed = new URL(u);
-    if (!parsed.hostname.includes("facebook.com")) return null;
+    if (!isValidHostname(parsed.hostname, "facebook.com")) return null;
     const href = encodeURIComponent(u);
     return `https://www.facebook.com/plugins/video.php?href=${href}&show_text=false&height=360`;
   } catch {
@@ -67,10 +79,10 @@ function toFacebookEmbed(u: string) {
 function toTwitchEmbed(u: string, parentHost: string | null) {
   try {
     const parsed = new URL(u);
-    if (!parsed.hostname.includes("twitch.tv") && !parsed.hostname.includes("clips.twitch.tv")) return null;
+    if (!isValidHostname(parsed.hostname, "twitch.tv", "clips.twitch.tv")) return null;
     const parent = parentHost || "localhost";
 
-    if (parsed.hostname.includes("clips.twitch.tv")) {
+    if (isValidHostname(parsed.hostname, "clips.twitch.tv")) {
       const slug = parsed.pathname.split("/").filter(Boolean)[0];
       if (slug) return `https://clips.twitch.tv/embed?clip=${slug}&parent=${parent}&autoplay=false`;
     }
@@ -97,7 +109,7 @@ function toTwitchEmbed(u: string, parentHost: string | null) {
 function isXUrl(u: string) {
   try {
     const parsed = new URL(u);
-    return parsed.hostname.includes("twitter.com") || parsed.hostname.includes("x.com");
+    return isValidHostname(parsed.hostname, "twitter.com", "x.com");
   } catch {
     return false;
   }
@@ -106,7 +118,7 @@ function isXUrl(u: string) {
 function isInstagramUrl(u: string) {
   try {
     const parsed = new URL(u);
-    return parsed.hostname.includes("instagram.com");
+    return isValidHostname(parsed.hostname, "instagram.com");
   } catch {
     return false;
   }
@@ -130,6 +142,12 @@ function getTweetId(u: string): string | null {
 
 async function instagramOEmbed(url: string): Promise<string | null> {
   try {
+    // Validate that URL is actually from Instagram domain
+    const parsed = new URL(url);
+    if (!isValidHostname(parsed.hostname, "instagram.com")) {
+      return null;
+    }
+    
     const oembedUrl = `https://api.instagram.com/oembed/?url=${encodeURIComponent(url)}`;
     const res = await fetch(oembedUrl, {
       headers: { "user-agent": UA },
@@ -145,6 +163,12 @@ async function instagramOEmbed(url: string): Promise<string | null> {
 
 async function facebookOEmbed(url: string): Promise<string | null> {
   try {
+    // Validate that URL is actually from Facebook domain
+    const parsed = new URL(url);
+    if (!isValidHostname(parsed.hostname, "facebook.com")) {
+      return null;
+    }
+    
     const oembedUrl = `https://www.facebook.com/plugins/video/oembed.json/?url=${encodeURIComponent(url)}`;
     const res = await fetch(oembedUrl, {
       headers: { "user-agent": UA },
@@ -216,13 +240,13 @@ async function extractFromHtml(pageUrl: string, html: string): Promise<{ url: st
       const txt = $(el).contents().text();
       const data = JSON.parse(txt);
       
-      // Helper to recursively find contentUrl in nested objects/arrays
-      const findContentUrl = (obj: unknown): string | null => {
-        if (!obj) return null;
+      // Helper to recursively find contentUrl in nested objects/arrays with depth limiting
+      const findContentUrl = (obj: unknown, depth = 0): string | null => {
+        if (!obj || depth > 10) return null; // Limit recursion depth to prevent excessive processing
         if (typeof obj === 'string') return null;
         if (Array.isArray(obj)) {
           for (const item of obj) {
-            const found = findContentUrl(item);
+            const found = findContentUrl(item, depth + 1);
             if (found) return found;
           }
           return null;
@@ -234,7 +258,7 @@ async function extractFromHtml(pageUrl: string, html: string): Promise<{ url: st
           }
           // Check nested properties
           for (const key in objRecord) {
-            const found = findContentUrl(objRecord[key]);
+            const found = findContentUrl(objRecord[key], depth + 1);
             if (found) return found;
           }
         }

@@ -13,6 +13,9 @@ declare global {
   }
 }
 
+// Instagram embed script URL constant
+const INSTAGRAM_EMBED_SCRIPT_URL = "https://www.instagram.com/embed.js" as const;
+
 export default function Page() {
   const [theme, setTheme] = useState<"light" | "dark" | "system">("system");
   const [url, setUrl] = useState("");
@@ -53,9 +56,9 @@ export default function Page() {
   useEffect(() => {
     if (provider === "instagram" && embedHtml) {
       // Load Instagram embed script if not already loaded
-      if (!document.querySelector('script[src="https://www.instagram.com/embed.js"]')) {
+      if (!document.querySelector(`script[src="${INSTAGRAM_EMBED_SCRIPT_URL}"]`)) {
         const script = document.createElement("script");
-        script.src = "https://www.instagram.com/embed.js";
+        script.src = INSTAGRAM_EMBED_SCRIPT_URL;
         script.async = true;
         document.body.appendChild(script);
         script.onload = () => {
@@ -336,6 +339,8 @@ export default function Page() {
                 <div className="rounded-lg overflow-hidden preview-bg preview-container">
                   {embedHtml ? (
                     // Render embedHtml from oEmbed (Instagram/Facebook)
+                    // Note: embedHtml comes from trusted oEmbed APIs (Instagram/Facebook) via our server-side resolver
+                    // The URLs are validated to ensure they're from legitimate domains before fetching oEmbed
                     <div className="preview-embed-wrapper" dangerouslySetInnerHTML={{ __html: embedHtml }} />
                   ) : provider === "youtube" || provider === "facebook" || provider === "twitch" || provider === "x" ? (
                     <div className="preview-embed-wrapper">
