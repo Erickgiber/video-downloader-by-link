@@ -2,17 +2,32 @@
 
 import React, { useEffect, useRef, useState } from "react";
 
+// TypeScript declaration for Instagram embed
+declare global {
+  interface Window {
+    instgrm?: {
+      Embeds?: {
+        process: () => void;
+      };
+    };
+  }
+}
+
+// Instagram embed script URL constant
+const INSTAGRAM_EMBED_SCRIPT_URL = "https://www.instagram.com/embed.js" as const;
+
 export default function Page() {
   const [theme, setTheme] = useState<"light" | "dark" | "system">("system");
   const [url, setUrl] = useState("");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [provider, setProvider] = useState<"youtube" | "direct" | "facebook" | "x" | "twitch" | "unknown" | null>(null);
+  const [provider, setProvider] = useState<"youtube" | "direct" | "facebook" | "x" | "twitch" | "instagram" | "unknown" | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [downloadLoading, setDownloadLoading] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [downloadable, setDownloadable] = useState(false);
   const [isHls, setIsHls] = useState(false);
+  const [embedHtml, setEmbedHtml] = useState<string | null>(null);
 
   useEffect(() => {
     if (!toast) return;
@@ -36,6 +51,32 @@ export default function Page() {
       setTheme("system");
     }
   }, []);
+
+  // Load Instagram embed script when Instagram embed is present
+  useEffect(() => {
+    if (provider === "instagram" && embedHtml) {
+      // Load Instagram embed script if not already loaded
+      if (!document.querySelector(`script[src="${INSTAGRAM_EMBED_SCRIPT_URL}"]`)) {
+        const script = document.createElement("script");
+        script.src = INSTAGRAM_EMBED_SCRIPT_URL;
+        script.async = true;
+        document.body.appendChild(script);
+        script.onload = () => {
+          // Process embeds after script loads
+          if (window.instgrm?.Embeds?.process) {
+            window.instgrm.Embeds.process();
+          }
+        };
+      } else {
+        // Script already loaded, just process embeds
+        setTimeout(() => {
+          if (window.instgrm?.Embeds?.process) {
+            window.instgrm.Embeds.process();
+          }
+        }, 100);
+      }
+    }
+  }, [provider, embedHtml]);
 
   function applyTheme(t: "light" | "dark" | "system") {
     try {
@@ -83,6 +124,7 @@ export default function Page() {
     setProvider(null);
     setDownloadable(false);
     setIsHls(false);
+    setEmbedHtml(null);
 
     // small delay so loading UI is visible
     await new Promise((r) => setTimeout(r, 250));
@@ -91,16 +133,18 @@ export default function Page() {
       const res = await fetch(`/api/resolve?url=${encodeURIComponent(cleaned)}`, { cache: "no-store" });
       if (!res.ok) throw new Error("resolve failed");
       const data: {
-        provider: "youtube" | "facebook" | "twitch" | "x" | "direct" | "unknown";
+        provider: "youtube" | "facebook" | "twitch" | "x" | "instagram" | "direct" | "unknown";
         previewUrl: string | null;
         downloadable: boolean;
         isHls?: boolean;
+        embedHtml?: string | null;
       } = await res.json();
 
       setProvider(data.provider);
       setPreviewUrl(data.previewUrl);
       setDownloadable(!!data.downloadable);
       setIsHls(!!data.isHls);
+      setEmbedHtml(data.embedHtml || null);
 
       // Para X/Twitter ahora usamos iframe oficial, no requiere widgets.js
     } catch (err) {
@@ -162,9 +206,9 @@ export default function Page() {
       setTimeout(() => URL.revokeObjectURL(objectUrl), 10_000);
 
       setToast("Descarga iniciada");
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
-      const msg = (err && typeof err.message === 'string') ? err.message : "Ocurrió un error al descargar el video";
+      const msg = (err && typeof err === 'object' && 'message' in err && typeof err.message === 'string') ? err.message : "Ocurrió un error al descargar el video";
       setToast(msg);
     } finally {
       setDownloadLoading(false);
@@ -183,6 +227,7 @@ export default function Page() {
     setProvider(null);
     setDownloadable(false);
     setIsHls(false);
+    setEmbedHtml(null);
     setLoadingPreview(false);
     setDownloadLoading(false);
     setToast(null);
@@ -216,7 +261,7 @@ export default function Page() {
         <div className="card shadow-lg rounded-2xl p-6 sm:p-10">
           <h1 className="text-xl sm:text-2xl font-semibold text-app">Descargar y compartir videos</h1>
           <div className="mt-2 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4">
-            <p className="text-sm muted">Pega un enlace de video (YouTube o enlace directo) y previsualiza antes de descargar o compartir.</p>
+            <p className="text-sm muted">Pega un enlace de video (YouTube, Instagram, Facebook o enlace directo) y previsualiza antes de descargar o compartir.</p>
             <div className="sm:ml-4 inline-flex items-center gap-2">
               <span className="text-xs muted">Tema</span>
               <div className={`segmented ${theme === "light" ? "pos-light" : theme === "system" ? "pos-system" : "pos-dark"}`} role="tablist" aria-label="Tema">
@@ -276,7 +321,7 @@ export default function Page() {
           </form>
 
           <div className="mt-6">
-            {!previewUrl && (
+            {!previewUrl && !embedHtml && (
               <div className="rounded-lg p-6 text-center muted border border-dashed border-(--border)">
                 <p>Para comenzar, introduce un enlace y pulsa &quot;Previsualizar video&quot;.</p>
                 <p className="mt-3 text-sm">Existen videos que no son descargables por causa de algun formato o el proveedor.</p>
@@ -289,10 +334,15 @@ export default function Page() {
               </div>
             )}
 
-            {previewUrl && !loadingPreview && (
+            {(previewUrl || embedHtml) && !loadingPreview && (
               <div className="mt-4 space-y-4 fade-in">
                 <div className="rounded-lg overflow-hidden preview-bg preview-container">
-                  {provider === "youtube" || provider === "facebook" || provider === "twitch" || provider === "x" ? (
+                  {embedHtml ? (
+                    // Render embedHtml from oEmbed (Instagram/Facebook)
+                    // Note: embedHtml comes from trusted oEmbed APIs (Instagram/Facebook) via our server-side resolver
+                    // The URLs are validated to ensure they're from legitimate domains before fetching oEmbed
+                    <div className="preview-embed-wrapper" dangerouslySetInnerHTML={{ __html: embedHtml }} />
+                  ) : provider === "youtube" || provider === "facebook" || provider === "twitch" || provider === "x" ? (
                     <div className="preview-embed-wrapper">
                       <iframe
                         src={previewUrl || undefined}
@@ -302,7 +352,7 @@ export default function Page() {
                         allowFullScreen
                       />
                     </div>
-                  ) : (
+                  ) : previewUrl ? (
                     <div className="preview-embed-wrapper">
                       <video
                         ref={videoRef}
@@ -313,7 +363,7 @@ export default function Page() {
                         Tu navegador no soporta la etiqueta video.
                       </video>
                     </div>
-                  )}
+                  ) : null}
                 </div>
 
                 {/* Warning banner when download is not supported */}
@@ -323,7 +373,9 @@ export default function Page() {
                     aria-live="polite"
                     className="w-full border bg-(--warning-bg) text-(--warning-text) border-(--warning-border) rounded-lg py-2.5 px-3"
                   >
-                    No es posible descargar este video: el proveedor o formato es incompatible para su descarga.
+                    {provider === "instagram" || provider === "facebook"
+                      ? "Este video no es descargable desde Instagram/Facebook. Puedes verlo en el sitio original."
+                      : "No es posible descargar este video: el proveedor o formato es incompatible para su descarga."}
                   </div>
                 )}
 
@@ -342,6 +394,15 @@ export default function Page() {
                       "Descargar"
                     )}
                   </button>
+
+                  {(provider === "instagram" || provider === "facebook") && (
+                    <button
+                      onClick={() => window.open(url, "_blank")}
+                      className="cursor-pointer w-full sm:flex-1 inline-flex items-center justify-center gap-2 btn-ghost px-4 py-3 font-medium hover:shadow"
+                    >
+                      Abrir en {provider === "instagram" ? "Instagram" : "Facebook"}
+                    </button>
+                  )}
 
                   <button
                     onClick={handleShare}

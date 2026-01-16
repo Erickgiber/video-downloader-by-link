@@ -4,7 +4,7 @@ import * as cheerio from "cheerio";
 
 export const runtime = "nodejs";
 
-type Provider = "youtube" | "facebook" | "twitch" | "x" | "direct" | "unknown";
+type Provider = "youtube" | "facebook" | "twitch" | "x" | "instagram" | "direct" | "unknown";
 
 type ResolveResult = {
   provider: Provider;
@@ -13,10 +13,23 @@ type ResolveResult = {
   contentType?: string | null;
   downloadable: boolean; // true only when it's a direct file like mp4/webm/quicktime
   isHls?: boolean;
+  embedHtml?: string | null; // oEmbed HTML for Instagram/Facebook embeds
 };
 
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36";
+
+// Helper function to safely check if a hostname matches a domain
+// Prevents URL substring sanitization vulnerabilities
+function isValidHostname(hostname: string, ...allowedDomains: string[]): boolean {
+  const lower = hostname.toLowerCase();
+  for (const domain of allowedDomains) {
+    if (lower === domain || lower === `www.${domain}` || lower.endsWith(`.${domain}`)) {
+      return true;
+    }
+  }
+  return false;
+}
 
 function isHttpUrl(u: string) {
   try {
@@ -40,11 +53,11 @@ function isHlsContentType(ct: string | null | undefined) {
 function toYoutubeEmbed(u: string) {
   try {
     const parsed = new URL(u);
-    if (parsed.hostname.includes("youtube.com")) {
+    if (isValidHostname(parsed.hostname, "youtube.com")) {
       const v = parsed.searchParams.get("v");
       if (v) return `https://www.youtube.com/embed/${v}`;
     }
-    if (parsed.hostname.includes("youtu.be")) {
+    if (isValidHostname(parsed.hostname, "youtu.be")) {
       const id = parsed.pathname.slice(1);
       if (id) return `https://www.youtube.com/embed/${id}`;
     }
@@ -55,7 +68,7 @@ function toYoutubeEmbed(u: string) {
 function toFacebookEmbed(u: string) {
   try {
     const parsed = new URL(u);
-    if (!parsed.hostname.includes("facebook.com")) return null;
+    if (!isValidHostname(parsed.hostname, "facebook.com")) return null;
     const href = encodeURIComponent(u);
     return `https://www.facebook.com/plugins/video.php?href=${href}&show_text=false&height=360`;
   } catch {
@@ -66,10 +79,10 @@ function toFacebookEmbed(u: string) {
 function toTwitchEmbed(u: string, parentHost: string | null) {
   try {
     const parsed = new URL(u);
-    if (!parsed.hostname.includes("twitch.tv") && !parsed.hostname.includes("clips.twitch.tv")) return null;
+    if (!isValidHostname(parsed.hostname, "twitch.tv", "clips.twitch.tv")) return null;
     const parent = parentHost || "localhost";
 
-    if (parsed.hostname.includes("clips.twitch.tv")) {
+    if (isValidHostname(parsed.hostname, "clips.twitch.tv")) {
       const slug = parsed.pathname.split("/").filter(Boolean)[0];
       if (slug) return `https://clips.twitch.tv/embed?clip=${slug}&parent=${parent}&autoplay=false`;
     }
@@ -96,7 +109,16 @@ function toTwitchEmbed(u: string, parentHost: string | null) {
 function isXUrl(u: string) {
   try {
     const parsed = new URL(u);
-    return parsed.hostname.includes("twitter.com") || parsed.hostname.includes("x.com");
+    return isValidHostname(parsed.hostname, "twitter.com", "x.com");
+  } catch {
+    return false;
+  }
+}
+
+function isInstagramUrl(u: string) {
+  try {
+    const parsed = new URL(u);
+    return isValidHostname(parsed.hostname, "instagram.com");
   } catch {
     return false;
   }
@@ -113,6 +135,48 @@ function getTweetId(u: string): string | null {
       if (/^\d{5,}$/i.test(id)) return id;
     }
     return null;
+  } catch {
+    return null;
+  }
+}
+
+async function instagramOEmbed(url: string): Promise<string | null> {
+  try {
+    // Validate that URL is actually from Instagram domain
+    const parsed = new URL(url);
+    if (!isValidHostname(parsed.hostname, "instagram.com")) {
+      return null;
+    }
+    
+    const oembedUrl = `https://api.instagram.com/oembed/?url=${encodeURIComponent(url)}`;
+    const res = await fetch(oembedUrl, {
+      headers: { "user-agent": UA },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data?.html || null;
+  } catch {
+    return null;
+  }
+}
+
+async function facebookOEmbed(url: string): Promise<string | null> {
+  try {
+    // Validate that URL is actually from Facebook domain
+    const parsed = new URL(url);
+    if (!isValidHostname(parsed.hostname, "facebook.com")) {
+      return null;
+    }
+    
+    const oembedUrl = `https://www.facebook.com/plugins/video/oembed.json/?url=${encodeURIComponent(url)}`;
+    const res = await fetch(oembedUrl, {
+      headers: { "user-agent": UA },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data?.html || null;
   } catch {
     return null;
   }
@@ -153,11 +217,14 @@ async function extractFromHtml(pageUrl: string, html: string): Promise<{ url: st
     if (v) metaCandidates.push(v);
   };
 
-  // Common meta tags
+  // Common meta tags - expanded with og:video:url and twitter:player
   push($("meta[property='og:video:secure_url']").attr("content"));
+  push($("meta[property='og:video:url']").attr("content"));
   push($("meta[property='og:video']").attr("content"));
   push($("meta[name='twitter:player:stream']").attr("content"));
   push($("meta[name='twitter:player:stream']").attr("value"));
+  push($("meta[name='twitter:player']").attr("content"));
+  push($("meta[property='twitter:player']").attr("content"));
 
   // link preload
   $("link[rel='preload'][as='video']").each((_, el) => push($(el).attr("href")));
@@ -167,15 +234,39 @@ async function extractFromHtml(pageUrl: string, html: string): Promise<{ url: st
   push(vSrc);
   $("video source").each((_, el) => push($(el).attr("src")));
 
-  // JSON-LD contentUrl
+  // JSON-LD contentUrl with robust traversal
   $("script[type='application/ld+json']").each((_, el) => {
     try {
       const txt = $(el).contents().text();
       const data = JSON.parse(txt);
-      const contentUrl = Array.isArray(data)
-        ? data.map((d) => d && d.contentUrl).find(Boolean)
-        : data?.contentUrl;
-      if (typeof contentUrl === "string") push(contentUrl);
+      
+      // Helper to recursively find contentUrl in nested objects/arrays with depth limiting
+      const findContentUrl = (obj: unknown, depth = 0): string | null => {
+        if (!obj || depth > 10) return null; // Limit recursion depth to prevent excessive processing
+        if (typeof obj === 'string') return null;
+        if (Array.isArray(obj)) {
+          for (const item of obj) {
+            const found = findContentUrl(item, depth + 1);
+            if (found) return found;
+          }
+          return null;
+        }
+        if (typeof obj === 'object') {
+          const objRecord = obj as Record<string, unknown>;
+          if (objRecord.contentUrl && typeof objRecord.contentUrl === 'string') {
+            return objRecord.contentUrl;
+          }
+          // Check nested properties
+          for (const key in objRecord) {
+            const found = findContentUrl(objRecord[key], depth + 1);
+            if (found) return found;
+          }
+        }
+        return null;
+      };
+      
+      const contentUrl = findContentUrl(data);
+      if (contentUrl) push(contentUrl);
     } catch {}
   });
 
@@ -200,24 +291,46 @@ async function resolveUrl(req: NextRequest, target: string): Promise<ResolveResu
   const originalUrl = target;
   const parentHost = req.headers.get("x-forwarded-host") || req.headers.get("host");
 
+  // Instagram support
+  if (isInstagramUrl(target)) {
+    const embedHtml = await instagramOEmbed(target);
+    if (embedHtml) {
+      return {
+        provider: "instagram",
+        previewUrl: null,
+        originalUrl,
+        downloadable: false,
+        embedHtml,
+      };
+    }
+    // Fallback if oEmbed fails
+    return { provider: "instagram", previewUrl: null, originalUrl, downloadable: false, embedHtml: null };
+  }
+
   // Known embed platforms
   const yt = toYoutubeEmbed(target);
   // Para YouTube, mostramos el embed para preview y verificamos si hay formato progresivo descargable
   if (yt) {
-    let downloadable = true;
-    try {
-      const id = ytdl.getURLVideoID(originalUrl);
-      const info = await ytdl.getInfo(id);
-      downloadable = info.formats.some((f) => f.hasVideo && f.hasAudio);
-    } catch {
-      // Si falla, dejamos descargable por defecto y lo validamos en /api/download
-      downloadable = true;
-    }
-    // Quemado el "false" temporalmente
+    // Quemado el "false" temporalmente - YouTube downloads disabled
     return { provider: "youtube", previewUrl: yt, originalUrl, downloadable: false };
   }
+  
   const fb = toFacebookEmbed(target);
-  if (fb) return { provider: "facebook", previewUrl: fb, originalUrl, downloadable: false };
+  if (fb) {
+    // Try oEmbed first for better preview
+    const embedHtml = await facebookOEmbed(target);
+    if (embedHtml) {
+      return {
+        provider: "facebook",
+        previewUrl: fb, // Keep iframe as fallback
+        originalUrl,
+        downloadable: false,
+        embedHtml,
+      };
+    }
+    return { provider: "facebook", previewUrl: fb, originalUrl, downloadable: false };
+  }
+  
   const tw = toTwitchEmbed(target, parentHost);
   if (tw) return { provider: "twitch", previewUrl: tw, originalUrl, downloadable: false };
   if (isXUrl(target)) {
