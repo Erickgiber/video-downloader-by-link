@@ -25,9 +25,11 @@ export default function Page() {
   const [downloadLoading, setDownloadLoading] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const embedContainerRef = useRef<HTMLDivElement | null>(null);
   const [downloadable, setDownloadable] = useState(false);
   const [isHls, setIsHls] = useState(false);
   const [embedHtml, setEmbedHtml] = useState<string | null>(null);
+  const [embedFailed, setEmbedFailed] = useState(false);
 
   useEffect(() => {
     if (!toast) return;
@@ -78,6 +80,31 @@ export default function Page() {
     }
   }, [provider, embedHtml]);
 
+  // Detect when embeds fail to render (common with third-party cookie blocking / tracking protection).
+  useEffect(() => {
+    setEmbedFailed(false);
+    if (!embedHtml) return;
+
+    const t = window.setTimeout(() => {
+      const root = embedContainerRef.current;
+      if (!root) return;
+
+      // If we don't see an iframe after a short delay, consider it a failed embed.
+      // Instagram's embed.js injects an iframe inside the blockquote.
+      const iframe = root.querySelector("iframe");
+      if (!iframe) {
+        setEmbedFailed(true);
+        return;
+      }
+
+      // For Facebook, we often inject the iframe immediately.
+      // For Instagram, presence of the iframe is a good enough signal.
+      setEmbedFailed(false);
+    }, 2500);
+
+    return () => window.clearTimeout(t);
+  }, [embedHtml, provider]);
+
   function applyTheme(t: "light" | "dark" | "system") {
     try {
       const el = document.documentElement;
@@ -125,6 +152,7 @@ export default function Page() {
     setDownloadable(false);
     setIsHls(false);
     setEmbedHtml(null);
+    setEmbedFailed(false);
 
     // small delay so loading UI is visible
     await new Promise((r) => setTimeout(r, 250));
@@ -145,6 +173,7 @@ export default function Page() {
       setDownloadable(!!data.downloadable);
       setIsHls(!!data.isHls);
       setEmbedHtml(data.embedHtml || null);
+      setEmbedFailed(false);
 
       // Para X/Twitter ahora usamos iframe oficial, no requiere widgets.js
     } catch (err) {
@@ -341,7 +370,7 @@ export default function Page() {
                     // Render embedHtml from oEmbed (Instagram/Facebook)
                     // Note: embedHtml comes from trusted oEmbed APIs (Instagram/Facebook) via our server-side resolver
                     // The URLs are validated to ensure they're from legitimate domains before fetching oEmbed
-                    <div className="preview-embed-wrapper" dangerouslySetInnerHTML={{ __html: embedHtml }} />
+                    <div ref={embedContainerRef} className="preview-html-wrapper" dangerouslySetInnerHTML={{ __html: embedHtml }} />
                   ) : provider === "youtube" || provider === "facebook" || provider === "twitch" || provider === "x" ? (
                     <div className="preview-embed-wrapper">
                       <iframe
@@ -366,6 +395,19 @@ export default function Page() {
                   ) : null}
                 </div>
 
+                {/* Fallback banner when embed cannot be rendered */}
+                {embedHtml && (provider === "instagram" || provider === "facebook") && embedFailed && (
+                  <div
+                    role="alert"
+                    aria-live="polite"
+                    className="w-full border bg-(--warning-bg) text-(--warning-text) border-(--warning-border) rounded-lg py-2.5 px-3"
+                  >
+                    {provider === "instagram"
+                      ? "No se pudo cargar la previsualización de Instagram en este navegador. Puedes abrir el reel en Instagram."
+                      : "No se pudo cargar la previsualización de Facebook en este navegador. Puedes abrir el video en Facebook."}
+                  </div>
+                )}
+
                 {/* Warning banner when download is not supported */}
                 {(!downloadable || (provider === "direct" && isHls)) && (
                   <div
@@ -373,9 +415,11 @@ export default function Page() {
                     aria-live="polite"
                     className="w-full border bg-(--warning-bg) text-(--warning-text) border-(--warning-border) rounded-lg py-2.5 px-3"
                   >
-                    {provider === "instagram" || provider === "facebook"
-                      ? "Este video no es descargable desde Instagram/Facebook. Puedes verlo en el sitio original."
-                      : "No es posible descargar este video: el proveedor o formato es incompatible para su descarga."}
+                    {provider === "instagram"
+                      ? "Este video no es descargable desde Instagram. Puedes verlo en el sitio original."
+                      : provider === "facebook"
+                        ? "Este video no es descargable desde Facebook. Puedes verlo en el sitio original."
+                        : "No es posible descargar este video: el proveedor o formato es incompatible para su descarga."}
                   </div>
                 )}
 

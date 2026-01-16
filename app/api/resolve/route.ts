@@ -1,5 +1,4 @@
 import { NextRequest } from "next/server";
-import ytdl from "ytdl-core";
 import * as cheerio from "cheerio";
 
 export const runtime = "nodejs";
@@ -18,6 +17,15 @@ type ResolveResult = {
 
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36";
+
+function escapeHtmlAttr(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
 
 // Helper function to safely check if a hostname matches a domain
 // Prevents URL substring sanitization vulnerabilities
@@ -63,17 +71,6 @@ function toYoutubeEmbed(u: string) {
     }
   } catch {}
   return null;
-}
-
-function toFacebookEmbed(u: string) {
-  try {
-    const parsed = new URL(u);
-    if (!isValidHostname(parsed.hostname, "facebook.com")) return null;
-    const href = encodeURIComponent(u);
-    return `https://www.facebook.com/plugins/video.php?href=${href}&show_text=false&height=360`;
-  } catch {
-    return null;
-  }
 }
 
 function toTwitchEmbed(u: string, parentHost: string | null) {
@@ -122,6 +119,100 @@ function isInstagramUrl(u: string) {
   } catch {
     return false;
   }
+}
+
+function isFacebookUrl(u: string) {
+  try {
+    const parsed = new URL(u);
+    return isValidHostname(parsed.hostname, "facebook.com", "fb.watch");
+  } catch {
+    return false;
+  }
+}
+
+function unwrapKnownRedirects(u: string): string {
+  try {
+    const parsed = new URL(u);
+    // Facebook outbound redirect: https://l.facebook.com/l.php?u=...
+    if (isValidHostname(parsed.hostname, "facebook.com") && parsed.hostname.toLowerCase().startsWith("l.")) {
+      const out = parsed.searchParams.get("u");
+      if (out && isHttpUrl(out)) return out;
+    }
+    // Instagram outbound redirect: https://l.instagram.com/?u=...
+    if (isValidHostname(parsed.hostname, "instagram.com") && parsed.hostname.toLowerCase().startsWith("l.")) {
+      const out = parsed.searchParams.get("u");
+      if (out && isHttpUrl(out)) return out;
+    }
+  } catch {
+    // ignore
+  }
+  return u;
+}
+
+function normalizeInstagramPermalink(u: string): string | null {
+  try {
+    const parsed = new URL(u);
+    if (!isValidHostname(parsed.hostname, "instagram.com")) return null;
+
+    // Keep only paths that Instagram supports for embed.
+    const parts = parsed.pathname.split("/").filter(Boolean);
+    const kind = (parts[0] || "").toLowerCase();
+    if (kind !== "p" && kind !== "reel" && kind !== "tv") return null;
+    if (!parts[1]) return null;
+
+    const clean = new URL(parsed.toString());
+    clean.protocol = "https:";
+    clean.hostname = "www.instagram.com";
+    clean.search = "";
+    clean.hash = "";
+    clean.pathname = `/${kind}/${parts[1]}/`;
+    return clean.toString();
+  } catch {
+    return null;
+  }
+}
+
+function buildInstagramEmbedHtml(u: string): string | null {
+  const permalink = normalizeInstagramPermalink(u);
+  if (!permalink) return null;
+  const safePermalink = escapeHtmlAttr(permalink);
+
+  // Official Instagram embed markup; embed.js (loaded client-side) will render it.
+  // If the user is logged in, Instagram can use their existing cookies inside the iframe context.
+  return `\
+<blockquote class="instagram-media" data-instgrm-permalink="${safePermalink}" data-instgrm-version="14" style="background:#FFF; border:0; border-radius:12px; box-shadow:0 1px 10px rgba(0,0,0,0.08); margin: 0 auto; max-width:540px; min-width: 326px; width:100%;">\
+  <div style="padding:16px;">\
+    <a href="${safePermalink}" target="_blank" rel="noopener noreferrer" style="color:#3897f0; text-decoration:none;">Ver en Instagram</a>\
+  </div>\
+</blockquote>`;
+}
+
+function buildFacebookEmbedUrl(u: string): string | null {
+  try {
+    const parsed = new URL(u);
+    if (!isValidHostname(parsed.hostname, "facebook.com", "fb.watch")) return null;
+
+    // The Facebook Video plugin supports many URL types (videos, reels, fb.watch).
+    const href = encodeURIComponent(u);
+    return `https://www.facebook.com/plugins/video.php?href=${href}&show_text=false&height=360&width=560`;
+  } catch {
+    return null;
+  }
+}
+
+function buildFacebookEmbedHtml(u: string): string | null {
+  const embed = buildFacebookEmbedUrl(u);
+  if (!embed) return null;
+  const safe = escapeHtmlAttr(embed);
+  return `\
+<iframe\
+  src="${safe}"\
+  style="border:none; overflow:hidden; width:100%; height:100%;"\
+  scrolling="no"\
+  frameborder="0"\
+  allowfullscreen="true"\
+  allow="autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share"\
+></iframe>`;
 }
 
 function getTweetId(u: string): string | null {
@@ -289,22 +380,32 @@ async function extractFromHtml(pageUrl: string, html: string): Promise<{ url: st
 
 async function resolveUrl(req: NextRequest, target: string): Promise<ResolveResult> {
   const originalUrl = target;
+  target = unwrapKnownRedirects(target);
   const parentHost = req.headers.get("x-forwarded-host") || req.headers.get("host");
 
   // Instagram support
   if (isInstagramUrl(target)) {
-    const embedHtml = await instagramOEmbed(target);
-    if (embedHtml) {
+    // Prefer official embed markup (works better for Reels, and can leverage user cookies if logged in).
+    const official = buildInstagramEmbedHtml(target);
+    if (official) {
       return {
         provider: "instagram",
         previewUrl: null,
         originalUrl,
         downloadable: false,
-        embedHtml,
+        embedHtml: official,
       };
     }
-    // Fallback if oEmbed fails
-    return { provider: "instagram", previewUrl: null, originalUrl, downloadable: false, embedHtml: null };
+
+    // Fallback to oEmbed (may fail without access token depending on Instagram policy).
+    const embedHtml = await instagramOEmbed(target);
+    return {
+      provider: "instagram",
+      previewUrl: null,
+      originalUrl,
+      downloadable: false,
+      embedHtml: embedHtml || null,
+    };
   }
 
   // Known embed platforms
@@ -315,20 +416,25 @@ async function resolveUrl(req: NextRequest, target: string): Promise<ResolveResu
     return { provider: "youtube", previewUrl: yt, originalUrl, downloadable: false };
   }
   
-  const fb = toFacebookEmbed(target);
-  if (fb) {
-    // Try oEmbed first for better preview
-    const embedHtml = await facebookOEmbed(target);
-    if (embedHtml) {
-      return {
-        provider: "facebook",
-        previewUrl: fb, // Keep iframe as fallback
-        originalUrl,
-        downloadable: false,
-        embedHtml,
-      };
+  if (isFacebookUrl(target)) {
+    const previewUrl = buildFacebookEmbedUrl(target);
+    const embedHtml = buildFacebookEmbedHtml(target);
+
+    // Also try oEmbed (nice-to-have), but keep our official iframe as the stable baseline.
+    let oembed: string | null = null;
+    try {
+      oembed = await facebookOEmbed(target);
+    } catch {
+      // ignore
     }
-    return { provider: "facebook", previewUrl: fb, originalUrl, downloadable: false };
+
+    return {
+      provider: "facebook",
+      previewUrl: previewUrl || null,
+      originalUrl,
+      downloadable: false,
+      embedHtml: oembed || embedHtml,
+    };
   }
   
   const tw = toTwitchEmbed(target, parentHost);
